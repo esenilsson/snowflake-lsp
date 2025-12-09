@@ -110,12 +110,24 @@ export class SchemaCache {
    * Get table by qualified name or partial match
    */
   getTable(name: string): CachedTable | undefined {
+    const upperName = name.toUpperCase();
+
     // Try exact match first
-    const exact = this.tables.get(name);
+    const exact = this.tables.get(upperName);
     if (exact) return exact;
 
-    // Try case-insensitive partial match
-    const lowerName = name.toLowerCase();
+    // Try partial match for schema.table format
+    // Check if any full qualified name ends with the provided name
+    for (const [qualifiedName, table] of this.tables) {
+      // Match SCHEMA.TABLE or DATABASE.SCHEMA.TABLE
+      if (qualifiedName.endsWith('.' + upperName) ||
+          qualifiedName === upperName) {
+        return table;
+      }
+    }
+
+    // Try case-insensitive table name only
+    const lowerName = name.split('.').pop()?.toLowerCase() || name.toLowerCase();
     const matches = this.tableNameIndex.get(lowerName);
     if (matches && matches.length > 0) {
       return this.tables.get(matches[0]);

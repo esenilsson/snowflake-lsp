@@ -16,39 +16,24 @@ export class DiagnosticsProvider {
     // Extract table references and validate they exist
     const tableRefs = this.extractTableReferences(text);
     for (const ref of tableRefs) {
-      if (!this.schemaCache.tableExists(ref.name)) {
+      // Try to find the table with multiple strategies
+      const exists = this.schemaCache.tableExists(ref.name) ||
+                     this.schemaCache.tableExists(ref.name.toUpperCase()) ||
+                     this.schemaCache.tableExists(ref.name.toLowerCase());
+
+      if (!exists) {
+        // Only show as hint, not error - table might exist but not in cache
         diagnostics.push({
-          severity: DiagnosticSeverity.Error,
+          severity: DiagnosticSeverity.Hint,
           range: ref.range,
-          message: `Table '${ref.name}' not found in schema cache`,
+          message: `Table '${ref.name}' not found in schema cache (might still be valid)`,
           source: 'snowflake-lsp',
         });
       }
     }
 
-    // Extract column references and validate
-    const columnRefs = this.extractColumnReferences(text);
-    for (const ref of columnRefs) {
-      // Try to validate column exists in any of the tables in scope
-      const tablesInScope = this.extractTablesFromQuery(text);
-      let found = false;
-
-      for (const table of tablesInScope) {
-        if (this.schemaCache.columnExists(table, ref.name)) {
-          found = true;
-          break;
-        }
-      }
-
-      if (!found && tablesInScope.length > 0) {
-        diagnostics.push({
-          severity: DiagnosticSeverity.Warning,
-          range: ref.range,
-          message: `Column '${ref.name}' not found in referenced tables`,
-          source: 'snowflake-lsp',
-        });
-      }
-    }
+    // Skip column validation for now - it's too complex and error-prone
+    // Column validation would require proper SQL parsing to be reliable
 
     return diagnostics;
   }
@@ -58,18 +43,20 @@ export class DiagnosticsProvider {
    */
   private extractTableReferences(text: string): Array<{ name: string; range: any }> {
     const refs: Array<{ name: string; range: any }> = [];
-    const pattern = /\b(?:FROM|JOIN)\s+([\w.]+)/gi;
+    // Match schema.table or just table, handling optional whitespace around dots
+    const pattern = /\b(?:FROM|JOIN)\s+([\w]+(?:\s*\.\s*[\w]+)?)/gi;
     let match;
 
     while ((match = pattern.exec(text)) !== null) {
-      const tableName = match[1];
-      const startIdx = match.index + match[0].indexOf(tableName);
+      // Remove whitespace around dots (MART. DIM_CURRENCY -> MART.DIM_CURRENCY)
+      const tableName = match[1].replace(/\s*\.\s*/g, '.');
+      const startIdx = match.index + match[0].indexOf(match[1]);
 
       refs.push({
         name: tableName,
         range: {
           start: this.offsetToPosition(text, startIdx),
-          end: this.offsetToPosition(text, startIdx + tableName.length),
+          end: this.offsetToPosition(text, startIdx + match[1].length),
         },
       });
     }
