@@ -11,6 +11,7 @@ export interface ParsedContext {
   context: SQLContext;
   currentWord: string;
   tablesInScope: string[];  // Tables mentioned in FROM/JOIN
+  aliases: Map<string, string>;  // alias -> table name mapping
   previousKeyword: string | null;
 }
 
@@ -24,8 +25,8 @@ export function parseContext(text: string, position: number): ParsedContext {
   // Extract current word at cursor
   const currentWord = extractCurrentWord(text, position);
 
-  // Find tables in scope (mentioned in FROM/JOIN clauses)
-  const tablesInScope = extractTablesInScope(beforeCursor);
+  // Find tables in scope (mentioned in FROM/JOIN clauses) and their aliases
+  const { tables: tablesInScope, aliases } = extractTablesAndAliases(beforeCursor);
 
   // Determine previous keyword
   const previousKeyword = findPreviousKeyword(beforeCursor);
@@ -33,13 +34,15 @@ export function parseContext(text: string, position: number): ParsedContext {
   // Determine context based on patterns
   let context = SQLContext.GENERAL;
 
-  // Check for schema.| or table.| pattern
+  // Check for schema.| or table.| or alias.| pattern
   if (/(\w+)\.\s*$/i.test(beforeCursor)) {
     const match = beforeCursor.match(/(\w+)\.\s*$/i);
     if (match) {
       const identifier = match[1].toLowerCase();
-      // Simple heuristic: if it's in tablesInScope, it's a table, otherwise assume schema
-      if (tablesInScope.some(t => t.toLowerCase().includes(identifier))) {
+      // Check if it's an alias first, then table, otherwise assume schema
+      if (aliases.has(identifier)) {
+        context = SQLContext.TABLE_DOT;
+      } else if (tablesInScope.some(t => t.toLowerCase().includes(identifier))) {
         context = SQLContext.TABLE_DOT;
       } else {
         context = SQLContext.SCHEMA_DOT;
@@ -64,6 +67,7 @@ export function parseContext(text: string, position: number): ParsedContext {
     context,
     currentWord,
     tablesInScope,
+    aliases,
     previousKeyword,
   };
 }
@@ -105,32 +109,44 @@ function findPreviousKeyword(text: string): string | null {
 }
 
 /**
- * Extract table names from FROM and JOIN clauses
+ * Extract table names and aliases from FROM and JOIN clauses
  */
-function extractTablesInScope(text: string): string[] {
+function extractTablesAndAliases(text: string): { tables: string[]; aliases: Map<string, string> } {
   const tables: string[] = [];
+  const aliases = new Map<string, string>();
   const textLower = text.toLowerCase();
 
-  // Match FROM table_name [AS alias]
-  const fromPattern = /\bfrom\s+([\w.]+)(?:\s+as\s+(\w+))?/gi;
+  // Match FROM table_name [AS] alias or FROM table_name
+  // Handles: FROM table, FROM table alias, FROM table AS alias
+  const fromPattern = /\bfrom\s+([\w.]+)(?:\s+(?:as\s+)?(\w+))?/gi;
   let match;
   while ((match = fromPattern.exec(textLower)) !== null) {
-    tables.push(match[1]);  // table name
-    if (match[2]) {
-      tables.push(match[2]);  // alias
+    const tableName = match[1];
+    const alias = match[2];
+
+    tables.push(tableName);
+
+    if (alias && alias !== 'where' && alias !== 'join' && alias !== 'left' && alias !== 'right' && alias !== 'inner' && alias !== 'outer') {
+      aliases.set(alias, tableName);
+      tables.push(alias);
     }
   }
 
-  // Match JOIN table_name [AS alias]
-  const joinPattern = /\bjoin\s+([\w.]+)(?:\s+as\s+(\w+))?/gi;
+  // Match JOIN table_name [AS] alias or JOIN table_name
+  const joinPattern = /\bjoin\s+([\w.]+)(?:\s+(?:as\s+)?(\w+))?/gi;
   while ((match = joinPattern.exec(textLower)) !== null) {
-    tables.push(match[1]);  // table name
-    if (match[2]) {
-      tables.push(match[2]);  // alias
+    const tableName = match[1];
+    const alias = match[2];
+
+    tables.push(tableName);
+
+    if (alias && alias !== 'on' && alias !== 'where' && alias !== 'join' && alias !== 'left' && alias !== 'right' && alias !== 'inner' && alias !== 'outer') {
+      aliases.set(alias, tableName);
+      tables.push(alias);
     }
   }
 
-  return tables;
+  return { tables, aliases };
 }
 
 /**

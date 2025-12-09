@@ -30,8 +30,8 @@ export class CompletionProvider {
         break;
 
       case SQLContext.TABLE_DOT:
-        // Suggest columns for the table
-        completions.push(...this.getColumnCompletionsForTable(parsed.currentWord, parsed.tablesInScope));
+        // Suggest columns for the table or alias
+        completions.push(...this.getColumnCompletionsForTable(parsed.currentWord, parsed.aliases));
         break;
 
       case SQLContext.SCHEMA_DOT:
@@ -129,27 +129,21 @@ export class CompletionProvider {
   }
 
   /**
-   * Get column completions for a specific table (after table.)
+   * Get column completions for a specific table or alias (after table. or alias.)
    */
-  private getColumnCompletionsForTable(tablePrefix: string, tablesInScope: string[]): CompletionItem[] {
-    // Extract table name from prefix (e.g., "table.")
+  private getColumnCompletionsForTable(tablePrefix: string, aliases: Map<string, string>): CompletionItem[] {
+    // Extract identifier from prefix (e.g., "a." -> "a")
     const parts = tablePrefix.split('.');
     if (parts.length < 1) return [];
 
-    const tableName = parts[0];
+    const identifier = parts[0];
+
+    // Check if it's an alias first
+    const actualTableName = aliases.get(identifier.toLowerCase()) || identifier;
 
     // Try to find the table
-    const table = this.schemaCache.getTable(tableName);
+    const table = this.schemaCache.getTable(actualTableName);
     if (!table) {
-      // Maybe it's an alias? Try matching against tablesInScope
-      for (const scopeTable of tablesInScope) {
-        if (scopeTable.toLowerCase() === tableName.toLowerCase()) {
-          const foundTable = this.schemaCache.getTable(scopeTable);
-          if (foundTable) {
-            return this.createColumnCompletionsFromTable(foundTable.columns);
-          }
-        }
-      }
       return [];
     }
 
