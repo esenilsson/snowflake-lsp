@@ -11,15 +11,25 @@ export interface CachedColumn {
   info: ColumnInfo;
 }
 
+export interface DDLCache {
+  ddl: string;
+  fetchedAt: number; // timestamp
+}
+
 export class SchemaCache {
   private tables: Map<string, CachedTable> = new Map();
   private columns: Map<string, CachedColumn> = new Map();
   private views: Map<string, ViewInfo> = new Map();
   private schemas: Set<string> = new Set(); // Store unique schema names
+  private ddlCache: Map<string, DDLCache> = new Map(); // DDL cache with TTL
+  private tablesWithColumns: Set<string> = new Set(); // Track which tables have columns loaded
 
   // Index for partial matching (lowercase for case-insensitive search)
   private tableNameIndex: Map<string, string[]> = new Map();
   private columnNameIndex: Map<string, string[]> = new Map();
+
+  // DDL cache TTL (24 hours in milliseconds)
+  private readonly DDL_CACHE_TTL = 24 * 60 * 60 * 1000;
 
   /**
    * Clear all cached data
@@ -29,6 +39,8 @@ export class SchemaCache {
     this.columns.clear();
     this.views.clear();
     this.schemas.clear();
+    this.ddlCache.clear();
+    this.tablesWithColumns.clear();
     this.tableNameIndex.clear();
     this.columnNameIndex.clear();
   }
@@ -259,6 +271,115 @@ export class SchemaCache {
       views: this.views.size,
       schemas: this.schemas.size,
     };
+  }
+
+  /**
+   * Check if DDL is cached and not expired
+   */
+  hasDDL(qualifiedName: string): boolean {
+    const cached = this.ddlCache.get(qualifiedName.toUpperCase());
+    if (!cached) return false;
+
+    const now = Date.now();
+    const isExpired = now - cached.fetchedAt > this.DDL_CACHE_TTL;
+
+    if (isExpired) {
+      this.ddlCache.delete(qualifiedName.toUpperCase());
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Get cached DDL
+   */
+  getDDL(qualifiedName: string): string | undefined {
+    if (!this.hasDDL(qualifiedName)) return undefined;
+
+    const cached = this.ddlCache.get(qualifiedName.toUpperCase());
+    return cached?.ddl;
+  }
+
+  /**
+   * Cache DDL with current timestamp
+   */
+  cacheDDL(qualifiedName: string, ddl: string): void {
+    this.ddlCache.set(qualifiedName.toUpperCase(), {
+      ddl,
+      fetchedAt: Date.now(),
+    });
+  }
+
+  /**
+   * Check if table has columns loaded
+   */
+  hasColumns(qualifiedName: string): boolean {
+    return this.tablesWithColumns.has(qualifiedName.toUpperCase());
+  }
+
+  /**
+   * Ensure columns are loaded for a table (lazy loading)
+   * @param qualifiedName - DATABASE.SCHEMA.TABLE
+   * @param fetcher - Function to fetch columns if not cached
+   */
+  async ensureColumnsLoaded(
+    qualifiedName: string,
+    fetcher: (db: string, schema: string, table: string) => Promise<ColumnInfo[]>
+  ): Promise<void> {
+    const upperName = qualifiedName.toUpperCase();
+
+    // Already loaded?
+    if (this.tablesWithColumns.has(upperName)) {
+      return;
+    }
+
+    // Parse qualified name
+    const parts = upperName.split('.');
+    if (parts.length !== 3) {
+      throw new Error(`Invalid qualified name: ${qualifiedName}`);
+    }
+
+    const [db, schema, table] = parts;
+
+    // Fetch columns
+    try {
+      const columns = await fetcher(db, schema, table);
+
+      // Add to cache
+      for (const column of columns) {
+        const colQualifiedName = this.makeQualifiedName(
+          column.catalog,
+          column.schema,
+          column.tableName,
+          column.columnName
+        );
+
+        this.columns.set(colQualifiedName, {
+          qualifiedName: colQualifiedName,
+          info: column,
+        });
+
+        // Index column name
+        const lowerColumnName = column.columnName.toLowerCase();
+        if (!this.columnNameIndex.has(lowerColumnName)) {
+          this.columnNameIndex.set(lowerColumnName, []);
+        }
+        this.columnNameIndex.get(lowerColumnName)!.push(colQualifiedName);
+      }
+
+      // Update table's columns array
+      const table_obj = this.tables.get(upperName);
+      if (table_obj) {
+        table_obj.columns = columns;
+      }
+
+      // Mark as loaded
+      this.tablesWithColumns.add(upperName);
+    } catch (error) {
+      console.error(`Failed to load columns for ${qualifiedName}:`, error);
+      throw error;
+    }
   }
 
   /**

@@ -95,7 +95,7 @@ connection.onInitialized(async () => {
 
     // Initialize providers
     completionProvider = new CompletionProvider(schemaCache);
-    hoverProvider = new HoverProvider(schemaCache);
+    hoverProvider = new HoverProvider(schemaCache, snowflakeConnection);
     definitionProvider = new DefinitionProvider(schemaCache);
     diagnosticsProvider = new DiagnosticsProvider(schemaCache);
     formattingProvider = new FormattingProvider();
@@ -145,7 +145,7 @@ connection.onHover(async (params) => {
   }
 
   try {
-    return hoverProvider.provideHover(document, params);
+    return await hoverProvider.provideHover(document, params);
   } catch (error) {
     connection.console.error(`Hover error: ${error}`);
     return undefined;
