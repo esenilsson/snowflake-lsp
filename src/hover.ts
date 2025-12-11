@@ -114,9 +114,8 @@ export class HoverProvider {
     const info = table.info;
     const qualifiedName = `${info.catalog}.${info.schema}.${info.name}`;
 
-    // Skip async operations for now to prevent crashes
-    // TODO: Re-enable after fixing Snowflake query stability
-    const skipAsyncOps = true;
+    // Enable async operations now that basic hover works
+    const skipAsyncOps = false;
 
     let columns: any[] = [];
     let ddl: string | undefined = undefined;
