@@ -17,47 +17,72 @@ export class HoverProvider {
     document: TextDocument,
     params: TextDocumentPositionParams
   ): Promise<Hover | undefined> {
-    const text = document.getText();
-    const offset = document.offsetAt(params.position);
+    try {
+      const text = document.getText();
+      const offset = document.offsetAt(params.position);
 
-    // Parse context to get current word
-    const parsed = parseContext(text, offset);
-    const word = parsed.currentWord;
+      // Parse context to get current word
+      const parsed = parseContext(text, offset);
+      const word = parsed.currentWord;
 
-    if (!word) return undefined;
+      if (!word) return undefined;
 
-    // Try to find as table
-    const table = this.schemaCache.getTable(word);
-    if (table) {
-      return {
-        contents: await this.createTableHoverContent(table),
-      };
-    }
-
-    // Try to find as column
-    // Need to check tables in scope to determine which table the column belongs to
-    for (const tableName of parsed.tablesInScope) {
-      const columns = this.schemaCache.getTableColumns(tableName);
-      const column = columns.find(c =>
-        c.columnName.toLowerCase() === word.toLowerCase()
-      );
-
-      if (column) {
-        return {
-          contents: this.createColumnHoverContent(column),
-        };
+      // Try to find as table
+      const table = this.schemaCache.getTable(word);
+      if (table) {
+        try {
+          return {
+            contents: await this.createTableHoverContent(table),
+          };
+        } catch (error) {
+          console.error('Error creating table hover content:', error);
+          // Return basic info on error
+          return {
+            contents: {
+              kind: 'markdown',
+              value: `### Table: \`${table.info.name}\`\n\n**Schema**: ${table.info.schema}\n\n_Error loading details_`,
+            },
+          };
+        }
       }
-    }
 
-    // If not found in scope tables, search all columns
-    const allColumns = this.schemaCache.searchColumns(word, undefined, 1);
-    if (allColumns.length > 0) {
-      return {
-        contents: this.createColumnHoverContent(allColumns[0].info),
-      };
-    }
+      // Try to find as column
+      // Need to check tables in scope to determine which table the column belongs to
+      for (const tableName of parsed.tablesInScope) {
+        try {
+          const columns = this.schemaCache.getTableColumns(tableName);
+          const column = columns.find(c =>
+            c.columnName.toLowerCase() === word.toLowerCase()
+          );
 
-    return undefined;
+          if (column) {
+            return {
+              contents: this.createColumnHoverContent(column),
+            };
+          }
+        } catch (error) {
+          console.error(`Error getting columns for table ${tableName}:`, error);
+          continue; // Try next table
+        }
+      }
+
+      // If not found in scope tables, search all columns
+      try {
+        const allColumns = this.schemaCache.searchColumns(word, undefined, 1);
+        if (allColumns.length > 0) {
+          return {
+            contents: this.createColumnHoverContent(allColumns[0].info),
+          };
+        }
+      } catch (error) {
+        console.error('Error searching columns:', error);
+      }
+
+      return undefined;
+    } catch (error) {
+      console.error('Hover provider error:', error);
+      return undefined;
+    }
   }
 
   /**

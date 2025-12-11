@@ -13,49 +13,59 @@ export class CompletionProvider {
     document: TextDocument,
     params: TextDocumentPositionParams
   ): CompletionItem[] {
-    const text = document.getText();
-    const offset = document.offsetAt(params.position);
+    try {
+      const text = document.getText();
+      const offset = document.offsetAt(params.position);
 
-    // Parse the SQL context
-    const parsed = parseContext(text, offset);
+      // Parse the SQL context
+      const parsed = parseContext(text, offset);
 
-    // Generate completions based on context
-    const completions: CompletionItem[] = [];
+      // Generate completions based on context
+      const completions: CompletionItem[] = [];
 
-    switch (parsed.context) {
-      case SQLContext.FROM_CLAUSE:
-        // Suggest table names and schemas
-        completions.push(...this.getTableCompletions(parsed.currentWord));
-        completions.push(...this.getSchemaCompletions(parsed.currentWord));
-        break;
+      try {
+        switch (parsed.context) {
+          case SQLContext.FROM_CLAUSE:
+            // Suggest table names and schemas
+            completions.push(...this.getTableCompletions(parsed.currentWord));
+            completions.push(...this.getSchemaCompletions(parsed.currentWord));
+            break;
 
-      case SQLContext.TABLE_DOT:
-        // Suggest columns for the table or alias
-        completions.push(...this.getColumnCompletionsForTable(parsed.currentWord, parsed.aliases));
-        break;
+          case SQLContext.TABLE_DOT:
+            // Suggest columns for the table or alias
+            completions.push(...this.getColumnCompletionsForTable(parsed.currentWord, parsed.aliases));
+            break;
 
-      case SQLContext.SCHEMA_DOT:
-        // Suggest tables in schema
-        completions.push(...this.getTableCompletionsForSchema(parsed.currentWord));
-        break;
+          case SQLContext.SCHEMA_DOT:
+            // Suggest tables in schema
+            completions.push(...this.getTableCompletionsForSchema(parsed.currentWord));
+            break;
 
-      case SQLContext.SELECT_LIST:
-      case SQLContext.WHERE_CLAUSE:
-        // Suggest columns from tables in scope and SQL keywords
-        completions.push(...this.getColumnCompletions(parsed.currentWord, parsed.tablesInScope));
-        completions.push(...this.getKeywordCompletions(parsed.currentWord));
-        break;
+          case SQLContext.SELECT_LIST:
+          case SQLContext.WHERE_CLAUSE:
+            // Suggest columns from tables in scope and SQL keywords
+            completions.push(...this.getColumnCompletions(parsed.currentWord, parsed.tablesInScope));
+            completions.push(...this.getKeywordCompletions(parsed.currentWord));
+            break;
 
-      case SQLContext.GENERAL:
-      default:
-        // Suggest SQL keywords, tables, schemas, and columns
-        completions.push(...this.getKeywordCompletions(parsed.currentWord));
-        completions.push(...this.getTableCompletions(parsed.currentWord));
-        completions.push(...this.getSchemaCompletions(parsed.currentWord));
-        break;
+          case SQLContext.GENERAL:
+          default:
+            // Suggest SQL keywords, tables, schemas, and columns
+            completions.push(...this.getKeywordCompletions(parsed.currentWord));
+            completions.push(...this.getTableCompletions(parsed.currentWord));
+            completions.push(...this.getSchemaCompletions(parsed.currentWord));
+            break;
+        }
+      } catch (error) {
+        console.error('Error generating completions for context:', error);
+        // Return what we have so far
+      }
+
+      return completions;
+    } catch (error) {
+      console.error('Completion provider error:', error);
+      return [];
     }
-
-    return completions;
   }
 
   /**
