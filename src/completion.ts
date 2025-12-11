@@ -2,6 +2,7 @@ import { CompletionItem, CompletionItemKind, TextDocumentPositionParams } from '
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { SchemaCache } from './schema-cache';
 import { parseContext, SQLContext, getSQLKeywords } from './sql-parser';
+import { SessionContext } from './session-context';
 
 export class CompletionProvider {
   constructor(private schemaCache: SchemaCache) {}
@@ -11,7 +12,8 @@ export class CompletionProvider {
    */
   provideCompletions(
     document: TextDocument,
-    params: TextDocumentPositionParams
+    params: TextDocumentPositionParams,
+    context?: SessionContext
   ): CompletionItem[] {
     try {
       const text = document.getText();
@@ -26,8 +28,12 @@ export class CompletionProvider {
       try {
         switch (parsed.context) {
           case SQLContext.FROM_CLAUSE:
-            // Suggest table names and schemas
-            completions.push(...this.getTableCompletions(parsed.currentWord));
+            // Suggest table names and schemas, prioritized by session context if available
+            if (context) {
+              completions.push(...this.getTableCompletionsWithContext(parsed.currentWord, context));
+            } else {
+              completions.push(...this.getTableCompletions(parsed.currentWord));
+            }
             completions.push(...this.getSchemaCompletions(parsed.currentWord));
             break;
 
@@ -52,7 +58,11 @@ export class CompletionProvider {
           default:
             // Suggest SQL keywords, tables, schemas, and columns
             completions.push(...this.getKeywordCompletions(parsed.currentWord));
-            completions.push(...this.getTableCompletions(parsed.currentWord));
+            if (context) {
+              completions.push(...this.getTableCompletionsWithContext(parsed.currentWord, context));
+            } else {
+              completions.push(...this.getTableCompletions(parsed.currentWord));
+            }
             completions.push(...this.getSchemaCompletions(parsed.currentWord));
             break;
         }
@@ -81,6 +91,53 @@ export class CompletionProvider {
       documentation: `Table in ${table.info.schema} schema\nType: ${table.info.type}\nColumns: ${table.columns.length}`,
       insertText: table.info.name,
     }));
+  }
+
+  /**
+   * Get table name completions with session context prioritization
+   * Prioritizes tables from current schema (✓), then current database (•), then others
+   */
+  private getTableCompletionsWithContext(prefix: string, context: SessionContext): CompletionItem[] {
+    const allTables = this.schemaCache.searchTables(prefix, 100);
+
+    // Separate into 3 priority groups
+    const currentSchema: CompletionItem[] = [];
+    const currentDatabase: CompletionItem[] = [];
+    const others: CompletionItem[] = [];
+
+    for (const table of allTables) {
+      const item: CompletionItem = {
+        label: table.info.name,
+        kind: CompletionItemKind.Class,
+        detail: `${table.info.catalog}.${table.info.schema}.${table.info.name}`,
+        documentation: `Table in ${table.info.schema} schema\nType: ${table.info.type}\nColumns: ${table.columns.length}`,
+        insertText: table.info.name,
+      };
+
+      // Check if table is in current schema (highest priority)
+      if (context.database && context.schema &&
+          table.info.catalog.toUpperCase() === context.database.toUpperCase() &&
+          table.info.schema.toUpperCase() === context.schema.toUpperCase()) {
+        item.sortText = `0_${table.info.name}`;
+        item.documentation = `✓ Current schema\n${item.documentation}`;
+        currentSchema.push(item);
+      }
+      // Check if table is in current database (medium priority)
+      else if (context.database &&
+               table.info.catalog.toUpperCase() === context.database.toUpperCase()) {
+        item.sortText = `1_${table.info.name}`;
+        item.documentation = `• Current database\n${item.documentation}`;
+        currentDatabase.push(item);
+      }
+      // Other tables (lowest priority)
+      else {
+        item.sortText = `2_${table.info.name}`;
+        others.push(item);
+      }
+    }
+
+    // Return with current schema first, then current database, then others
+    return [...currentSchema, ...currentDatabase, ...others];
   }
 
   /**

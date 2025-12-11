@@ -1,3 +1,5 @@
+import { UseCommand, UseCommandType } from './session-context';
+
 export enum SQLContext {
   SELECT_LIST,    // After SELECT, before FROM
   FROM_CLAUSE,    // After FROM or JOIN
@@ -172,4 +174,72 @@ export function getSQLKeywords(): string[] {
 export function isLikelyKeyword(word: string): boolean {
   const keywords = getSQLKeywords().map(k => k.toLowerCase());
   return keywords.includes(word.toLowerCase());
+}
+
+/**
+ * Parse USE commands from SQL text
+ * Detects: USE DATABASE, USE SCHEMA, USE WAREHOUSE, USE ROLE
+ * Also handles shorthand: USE <name> → USE DATABASE <name>
+ * And qualified: USE SCHEMA db.schema → USE DATABASE db + USE SCHEMA schema
+ */
+export function parseUseCommands(text: string): UseCommand[] {
+  const commands: UseCommand[] = [];
+  const lines = text.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Skip single-line comments
+    if (/^\s*--/.test(line)) continue;
+
+    // Skip multi-line comments (simple check)
+    if (/^\s*\/\*/.test(line)) continue;
+
+    // Match USE patterns (case-insensitive)
+    // Order matters: check specific patterns first, then shorthand
+
+    // USE DATABASE <name>
+    const useDb = line.match(/USE\s+DATABASE\s+(\w+)/i);
+    if (useDb) {
+      commands.push({ type: UseCommandType.DATABASE, value: useDb[1], line: i });
+      continue;
+    }
+
+    // USE SCHEMA <name> or USE SCHEMA <db>.<schema>
+    const useSchema = line.match(/USE\s+SCHEMA\s+([\w.]+)/i);
+    if (useSchema) {
+      // Handle qualified: PROD.ANALYTICS → DATABASE=PROD, SCHEMA=ANALYTICS
+      const parts = useSchema[1].split('.');
+      if (parts.length === 2) {
+        commands.push({ type: UseCommandType.DATABASE, value: parts[0], line: i });
+        commands.push({ type: UseCommandType.SCHEMA, value: parts[1], line: i });
+      } else {
+        commands.push({ type: UseCommandType.SCHEMA, value: useSchema[1], line: i });
+      }
+      continue;
+    }
+
+    // USE WAREHOUSE <name>
+    const useWh = line.match(/USE\s+WAREHOUSE\s+(\w+)/i);
+    if (useWh) {
+      commands.push({ type: UseCommandType.WAREHOUSE, value: useWh[1], line: i });
+      continue;
+    }
+
+    // USE ROLE <name>
+    const useRole = line.match(/USE\s+ROLE\s+(\w+)/i);
+    if (useRole) {
+      commands.push({ type: UseCommandType.ROLE, value: useRole[1], line: i });
+      continue;
+    }
+
+    // Shorthand: USE <name> → USE DATABASE <name>
+    // Only match if none of the specific patterns matched
+    const useShort = line.match(/USE\s+(\w+)/i);
+    if (useShort) {
+      commands.push({ type: UseCommandType.DATABASE, value: useShort[1], line: i });
+    }
+  }
+
+  return commands;
 }

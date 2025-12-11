@@ -15,6 +15,8 @@ import { HoverProvider } from './hover';
 import { DefinitionProvider } from './definition';
 import { DiagnosticsProvider } from './diagnostics';
 import { FormattingProvider } from './formatting';
+import { SessionContextManager } from './session-context';
+import { parseUseCommands } from './sql-parser';
 
 // Create LSP connection using stdio for communication with Helix
 const connection = createConnection(ProposedFeatures.all, process.stdin, process.stdout);
@@ -30,6 +32,7 @@ let hoverProvider: HoverProvider;
 let definitionProvider: DefinitionProvider;
 let diagnosticsProvider: DiagnosticsProvider;
 let formattingProvider: FormattingProvider;
+let sessionContextManager: SessionContextManager;
 
 let isInitialized = false;
 
@@ -100,6 +103,11 @@ connection.onInitialized(async () => {
     diagnosticsProvider = new DiagnosticsProvider(schemaCache);
     formattingProvider = new FormattingProvider();
 
+    // Initialize session context manager
+    sessionContextManager = new SessionContextManager();
+    await sessionContextManager.initializeGlobalContext(snowflakeConnection);
+    connection.console.log('Session context initialized');
+
     isInitialized = true;
 
     connection.console.log('Snowflake Language Server initialized successfully');
@@ -124,7 +132,9 @@ connection.onCompletion(async (params): Promise<CompletionItem[]> => {
   }
 
   try {
-    return completionProvider.provideCompletions(document, params);
+    // Get session context for this document
+    const context = sessionContextManager?.getContext(params.textDocument.uri);
+    return completionProvider.provideCompletions(document, params, context);
   } catch (error) {
     connection.console.error(`Completion error: ${error}`);
     return [];
@@ -215,14 +225,29 @@ async function validateDocument(document: TextDocument): Promise<void> {
 
 // Document change handlers
 documents.onDidOpen((event) => {
+  // Parse USE commands and initialize context for this document
+  const useCommands = parseUseCommands(event.document.getText());
+  if (sessionContextManager) {
+    sessionContextManager.updateContext(event.document.uri, useCommands);
+  }
   validateDocument(event.document);
 });
 
 documents.onDidChangeContent((change) => {
+  // Re-parse USE commands on document change
+  // TODO: Optimize by only parsing when text contains "USE"
+  if (sessionContextManager) {
+    const useCommands = parseUseCommands(change.document.getText());
+    sessionContextManager.updateContext(change.document.uri, useCommands);
+  }
   validateDocument(change.document);
 });
 
 documents.onDidClose((event) => {
+  // Clear session context for this document
+  if (sessionContextManager) {
+    sessionContextManager.clearContext(event.document.uri);
+  }
   // Clear diagnostics when document is closed
   connection.sendDiagnostics({
     uri: event.document.uri,
