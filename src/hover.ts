@@ -89,6 +89,18 @@ export class HoverProvider {
     const info = table.info;
     const qualifiedName = `${info.catalog}.${info.schema}.${info.name}`;
 
+    // Lazy-load columns if not already loaded
+    if (!this.schemaCache.hasColumns(qualifiedName)) {
+      try {
+        await this.schemaCache.ensureColumnsLoaded(
+          qualifiedName,
+          (db, schema, tbl) => this.snowflakeConnection.fetchColumnsForTable(db, schema, tbl)
+        );
+      } catch (error) {
+        console.error(`Failed to load columns for ${qualifiedName}:`, error);
+      }
+    }
+
     // Lazy-load DDL if not cached
     let ddl: string | undefined = this.schemaCache.getDDL(qualifiedName);
     if (!ddl) {
@@ -100,11 +112,15 @@ export class HoverProvider {
       }
     }
 
-    const columnList = table.columns.length > 0
-      ? table.columns
+    // Get updated table with columns
+    const updatedTable = this.schemaCache.getTable(qualifiedName);
+    const columns = updatedTable?.columns || [];
+
+    const columnList = columns.length > 0
+      ? columns
           .map((col: any) => `  - \`${col.columnName}\` (${col.dataType})`)
           .join('\n')
-      : '  _(Columns not loaded)_';
+      : '  _(No columns found)_';
 
     const markdown = [
       `### Table: \`${info.name}\``,
@@ -119,7 +135,7 @@ export class HoverProvider {
       info.comment ? `**Comment**: ${info.comment}` : '',
       info.cluster_by ? `**Cluster By**: ${info.cluster_by}` : '',
       '',
-      `**Columns**: ${table.columns.length}`,
+      `**Columns**: ${columns.length}`,
       '',
       '#### Column List:',
       columnList,

@@ -77,17 +77,17 @@ connection.onInitialized(async () => {
 
     connection.console.log('Loading schema from Snowflake...');
 
-    // Load schema data
-    const [tables, columns, views] = await Promise.all([
+    // Load schema data (columns loaded lazily on-demand)
+    const [tables, views] = await Promise.all([
       snowflakeConnection.fetchTables(),
-      snowflakeConnection.fetchColumns(),
       snowflakeConnection.fetchViews(),
     ]);
 
-    connection.console.log(`Loaded ${tables.length} tables, ${columns.length} columns, ${views.length} views`);
+    connection.console.log(`Loaded ${tables.length} tables, ${views.length} views`);
+    connection.console.log('Note: Columns will be loaded lazily on first access');
 
-    schemaCache.loadTables(tables, columns);
-    schemaCache.loadColumns(columns);
+    // Load tables without columns (empty array) - columns loaded on-demand
+    schemaCache.loadTables(tables, []);
     schemaCache.loadViews(views);
 
     const stats = schemaCache.getStats();
