@@ -1,4 +1,4 @@
-import { TableInfo, ColumnInfo, ViewInfo } from './snowflake';
+import { TableInfo, ColumnInfo, ViewInfo, WarehouseInfo, RoleInfo, UserInfo, DatabaseInfo } from './snowflake';
 
 export interface CachedTable {
   qualifiedName: string; // DATABASE.SCHEMA.TABLE
@@ -24,6 +24,12 @@ export class SchemaCache {
   private ddlCache: Map<string, DDLCache> = new Map(); // DDL cache with TTL
   private tablesWithColumns: Set<string> = new Set(); // Track which tables have columns loaded
 
+  // Advanced objects
+  private warehouses: Map<string, WarehouseInfo> = new Map(); // Warehouse name -> info
+  private roles: Map<string, RoleInfo> = new Map(); // Role name -> info
+  private users: Map<string, UserInfo> = new Map(); // User name -> info
+  private databases: Map<string, DatabaseInfo> = new Map(); // Database name -> info
+
   // Index for partial matching (lowercase for case-insensitive search)
   private tableNameIndex: Map<string, string[]> = new Map();
   private columnNameIndex: Map<string, string[]> = new Map();
@@ -43,6 +49,10 @@ export class SchemaCache {
     this.tablesWithColumns.clear();
     this.tableNameIndex.clear();
     this.columnNameIndex.clear();
+    this.warehouses.clear();
+    this.roles.clear();
+    this.users.clear();
+    this.databases.clear();
   }
 
   /**
@@ -387,5 +397,118 @@ export class SchemaCache {
    */
   private makeQualifiedName(...parts: string[]): string {
     return parts.join('.').toUpperCase();
+  }
+
+  /**
+   * Load warehouses into cache
+   */
+  loadWarehouses(warehouses: WarehouseInfo[]): void {
+    this.warehouses.clear();
+    for (const warehouse of warehouses) {
+      this.warehouses.set(warehouse.name.toUpperCase(), warehouse);
+    }
+    console.log(`Loaded ${warehouses.length} warehouses into cache`);
+  }
+
+  /**
+   * Get all warehouses
+   */
+  getWarehouses(): WarehouseInfo[] {
+    return Array.from(this.warehouses.values());
+  }
+
+  /**
+   * Search warehouses by prefix
+   */
+  searchWarehouses(prefix: string): WarehouseInfo[] {
+    const lowerPrefix = prefix.toLowerCase();
+    return this.getWarehouses().filter(wh =>
+      wh.name.toLowerCase().startsWith(lowerPrefix)
+    );
+  }
+
+  /**
+   * Load roles into cache
+   */
+  loadRoles(roles: RoleInfo[]): void {
+    this.roles.clear();
+    for (const role of roles) {
+      this.roles.set(role.name.toUpperCase(), role);
+    }
+    console.log(`Loaded ${roles.length} roles into cache`);
+  }
+
+  /**
+   * Get all roles
+   */
+  getRoles(): RoleInfo[] {
+    return Array.from(this.roles.values());
+  }
+
+  /**
+   * Search roles by prefix
+   */
+  searchRoles(prefix: string): RoleInfo[] {
+    const lowerPrefix = prefix.toLowerCase();
+    return this.getRoles().filter(role =>
+      role.name.toLowerCase().startsWith(lowerPrefix)
+    );
+  }
+
+  /**
+   * Load users into cache
+   */
+  loadUsers(users: UserInfo[]): void {
+    this.users.clear();
+    for (const user of users) {
+      this.users.set(user.name.toUpperCase(), user);
+    }
+    console.log(`Loaded ${users.length} users into cache`);
+  }
+
+  /**
+   * Get all users
+   */
+  getUsers(): UserInfo[] {
+    return Array.from(this.users.values());
+  }
+
+  /**
+   * Search users by prefix
+   */
+  searchUsers(prefix: string): UserInfo[] {
+    const lowerPrefix = prefix.toLowerCase();
+    return this.getUsers().filter(user =>
+      user.name.toLowerCase().startsWith(lowerPrefix) ||
+      user.login_name.toLowerCase().startsWith(lowerPrefix)
+    );
+  }
+
+  /**
+   * Load databases into cache
+   */
+  loadDatabases(databases: DatabaseInfo[]): void {
+    this.databases.clear();
+    for (const db of databases) {
+      this.databases.set(db.name.toUpperCase(), db);
+    }
+    console.log(`Loaded ${databases.length} databases into cache`);
+  }
+
+  /**
+   * Get all databases
+   */
+  getDatabases(): DatabaseInfo[] {
+    return Array.from(this.databases.values());
+  }
+
+  /**
+   * Search databases by prefix
+   */
+  searchDatabases(prefix: string): DatabaseInfo[] {
+    const lowerPrefix = prefix.toLowerCase();
+    return this.getDatabases().filter(db =>
+      db.name.toLowerCase().startsWith(lowerPrefix)
+    );
   }
 }

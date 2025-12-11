@@ -71,6 +71,69 @@ export interface DDLInfo {
   fetchedAt: number; // timestamp for TTL
 }
 
+export interface WarehouseInfo {
+  name: string;
+  state: string; // STARTED, SUSPENDED, RESUMING
+  type: string; // STANDARD, SNOWPARK-OPTIMIZED
+  size: string; // X-SMALL, SMALL, MEDIUM, LARGE, X-LARGE, etc.
+  running: number; // number of running queries
+  queued: number; // number of queued queries
+  is_default: boolean;
+  is_current: boolean;
+  auto_suspend: number | null; // minutes
+  auto_resume: boolean;
+  available: string; // available percentage
+  provisioning: string;
+  quiescing: string;
+  other: string;
+  created_on: string;
+  resumed_on: string;
+  updated_on: string;
+  owner: string;
+  comment: string | null;
+  resource_monitor: string;
+  actives: number;
+  pendings: number;
+  failed: number;
+  suspended: number;
+  uuid: string;
+  scaling_policy: string;
+}
+
+export interface RoleInfo {
+  created_on: string;
+  name: string;
+  is_default: boolean;
+  is_current: boolean;
+  is_inherited: boolean;
+  assigned_to_users: number;
+  granted_to_roles: number;
+  granted_roles: number;
+  owner: string;
+  comment: string | null;
+}
+
+export interface UserInfo {
+  name: string;
+  created_on: string;
+  login_name: string;
+  display_name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  disabled: boolean;
+  must_change_password: boolean;
+  snowflake_lock: boolean;
+  default_warehouse: string | null;
+  default_namespace: string | null;
+  default_role: string | null;
+  ext_authn_duo: boolean;
+  ext_authn_uid: string | null;
+  mins_to_bypass_mfa: number;
+  owner: string;
+  comment: string | null;
+}
+
 export class SnowflakeConnection {
   private connection: snowflake.Connection | null = null;
   private config: SnowflakeConfig;
@@ -130,28 +193,6 @@ export class SnowflakeConnection {
         },
       });
     });
-  }
-
-  /**
-   * Fetch databases using SHOW DATABASES
-   */
-  async fetchDatabases(): Promise<DatabaseInfo[]> {
-    const query = 'SHOW DATABASES';
-
-    try {
-      const rows = await this.executeQuery<any>(query);
-      // SHOW commands return lowercase column names
-      return rows.map(row => ({
-        name: row.name,
-        created_on: row.created_on,
-        owner: row.owner,
-        comment: row.comment || null,
-        retention_time: row.retention_time || 1,
-      }));
-    } catch (error) {
-      console.error('SHOW DATABASES failed:', error);
-      throw error;
-    }
   }
 
   /**
@@ -468,6 +509,129 @@ export class SnowflakeConnection {
    */
   isConnectionActive(): boolean {
     return this.isConnected;
+  }
+
+  /**
+   * Fetch all warehouses using SHOW WAREHOUSES
+   */
+  async fetchWarehouses(): Promise<WarehouseInfo[]> {
+    const query = 'SHOW WAREHOUSES';
+
+    try {
+      const rows = await this.executeQuery<any>(query);
+      return rows.map(row => ({
+        name: row.name,
+        state: row.state,
+        type: row.type,
+        size: row.size,
+        running: Number(row.running) || 0,
+        queued: Number(row.queued) || 0,
+        is_default: row.is_default === 'Y',
+        is_current: row.is_current === 'Y',
+        auto_suspend: row.auto_suspend !== null ? Number(row.auto_suspend) : null,
+        auto_resume: row.auto_resume === 'true',
+        available: row.available || '',
+        provisioning: row.provisioning || '',
+        quiescing: row.quiescing || '',
+        other: row.other || '',
+        created_on: row.created_on,
+        resumed_on: row.resumed_on,
+        updated_on: row.updated_on,
+        owner: row.owner,
+        comment: row.comment || null,
+        resource_monitor: row.resource_monitor,
+        actives: Number(row.actives) || 0,
+        pendings: Number(row.pendings) || 0,
+        failed: Number(row.failed) || 0,
+        suspended: Number(row.suspended) || 0,
+        uuid: row.uuid,
+        scaling_policy: row.scaling_policy,
+      }));
+    } catch (error) {
+      console.error('SHOW WAREHOUSES failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all roles using SHOW ROLES
+   */
+  async fetchRoles(): Promise<RoleInfo[]> {
+    const query = 'SHOW ROLES';
+
+    try {
+      const rows = await this.executeQuery<any>(query);
+      return rows.map(row => ({
+        created_on: row.created_on,
+        name: row.name,
+        is_default: row.is_default === 'Y',
+        is_current: row.is_current === 'Y',
+        is_inherited: row.is_inherited === 'Y',
+        assigned_to_users: Number(row.assigned_to_users) || 0,
+        granted_to_roles: Number(row.granted_to_roles) || 0,
+        granted_roles: Number(row.granted_roles) || 0,
+        owner: row.owner,
+        comment: row.comment || null,
+      }));
+    } catch (error) {
+      console.error('SHOW ROLES failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all users using SHOW USERS
+   */
+  async fetchUsers(): Promise<UserInfo[]> {
+    const query = 'SHOW USERS';
+
+    try {
+      const rows = await this.executeQuery<any>(query);
+      return rows.map(row => ({
+        name: row.name,
+        created_on: row.created_on,
+        login_name: row.login_name,
+        display_name: row.display_name,
+        first_name: row.first_name || '',
+        last_name: row.last_name || '',
+        email: row.email || '',
+        disabled: row.disabled === 'true',
+        must_change_password: row.must_change_password === 'true',
+        snowflake_lock: row.snowflake_lock === 'true',
+        default_warehouse: row.default_warehouse || null,
+        default_namespace: row.default_namespace || null,
+        default_role: row.default_role || null,
+        ext_authn_duo: row.ext_authn_duo === 'true',
+        ext_authn_uid: row.ext_authn_uid || null,
+        mins_to_bypass_mfa: Number(row.mins_to_bypass_mfa) || 0,
+        owner: row.owner,
+        comment: row.comment || null,
+      }));
+    } catch (error) {
+      console.error('SHOW USERS failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all databases using SHOW DATABASES
+   */
+  async fetchDatabases(): Promise<DatabaseInfo[]> {
+    const query = 'SHOW DATABASES';
+
+    try {
+      const rows = await this.executeQuery<any>(query);
+      return rows.map(row => ({
+        name: row.name,
+        created_on: row.created_on,
+        owner: row.owner,
+        comment: row.comment || null,
+        retention_time: Number(row.retention_time) || 1,
+      }));
+    } catch (error) {
+      console.error('SHOW DATABASES failed:', error);
+      return [];
+    }
   }
 }
 

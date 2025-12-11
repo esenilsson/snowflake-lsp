@@ -47,6 +47,31 @@ export class CompletionProvider {
             completions.push(...this.getTableCompletionsForSchema(parsed.currentWord));
             break;
 
+          case SQLContext.USE_WAREHOUSE:
+            // Suggest warehouse names
+            completions.push(...this.getWarehouseCompletions(parsed.currentWord));
+            break;
+
+          case SQLContext.USE_ROLE:
+            // Suggest role names
+            completions.push(...this.getRoleCompletions(parsed.currentWord));
+            break;
+
+          case SQLContext.USE_DATABASE:
+            // Suggest database names
+            completions.push(...this.getDatabaseCompletions(parsed.currentWord));
+            break;
+
+          case SQLContext.GRANT_TO_ROLE:
+            // Suggest role names for GRANT ... TO ROLE
+            completions.push(...this.getRoleCompletions(parsed.currentWord));
+            break;
+
+          case SQLContext.GRANT_TO_USER:
+            // Suggest user names for GRANT ... TO USER
+            completions.push(...this.getUserCompletions(parsed.currentWord));
+            break;
+
           case SQLContext.SELECT_LIST:
           case SQLContext.WHERE_CLAUSE:
             // Suggest columns from tables in scope and SQL keywords
@@ -244,5 +269,65 @@ export class CompletionProvider {
         kind: CompletionItemKind.Keyword,
         insertText: keyword,
       }));
+  }
+
+  /**
+   * Get warehouse completions
+   */
+  private getWarehouseCompletions(prefix: string): CompletionItem[] {
+    const warehouses = this.schemaCache.searchWarehouses(prefix);
+
+    return warehouses.map(warehouse => ({
+      label: warehouse.name,
+      kind: CompletionItemKind.Constant,
+      detail: `${warehouse.size} (${warehouse.state})`,
+      documentation: `Warehouse: ${warehouse.name}\nSize: ${warehouse.size}\nState: ${warehouse.state}\nAuto Suspend: ${warehouse.auto_suspend || 'N/A'} min\nAuto Resume: ${warehouse.auto_resume}`,
+      insertText: warehouse.name,
+    }));
+  }
+
+  /**
+   * Get role completions
+   */
+  private getRoleCompletions(prefix: string): CompletionItem[] {
+    const roles = this.schemaCache.searchRoles(prefix);
+
+    return roles.map(role => ({
+      label: role.name,
+      kind: CompletionItemKind.EnumMember,
+      detail: role.is_current ? `${role.name} (current)` : role.name,
+      documentation: `Role: ${role.name}\nAssigned to ${role.assigned_to_users} user(s)\nGranted to ${role.granted_to_roles} role(s)\nOwner: ${role.owner}`,
+      insertText: role.name,
+    }));
+  }
+
+  /**
+   * Get user completions
+   */
+  private getUserCompletions(prefix: string): CompletionItem[] {
+    const users = this.schemaCache.searchUsers(prefix);
+
+    return users.map(user => ({
+      label: user.name,
+      kind: CompletionItemKind.Value,
+      detail: user.display_name || user.name,
+      documentation: `User: ${user.name}\nLogin: ${user.login_name}\nEmail: ${user.email}\nDisabled: ${user.disabled}`,
+      insertText: user.name,
+    }));
+  }
+
+  /**
+   * Get database completions
+   */
+  private getDatabaseCompletions(prefix: string): CompletionItem[] {
+    const databases = this.schemaCache.searchDatabases(prefix);
+
+    return databases.map(db => ({
+      label: db.name,
+      kind: CompletionItemKind.Module,
+      detail: `Database: ${db.name}`,
+      documentation: `Database: ${db.name}\nOwner: ${db.owner}\nCreated: ${db.created_on}\nRetention: ${db.retention_time} day(s)${db.comment ? `\nComment: ${db.comment}` : ''}`,
+      insertText: db.name,
+    }));
   }
 }

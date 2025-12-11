@@ -6,6 +6,11 @@ export enum SQLContext {
   WHERE_CLAUSE,   // After WHERE
   TABLE_DOT,      // After table_name.
   SCHEMA_DOT,     // After schema_name.
+  USE_WAREHOUSE,  // After USE WAREHOUSE
+  USE_ROLE,       // After USE ROLE
+  USE_DATABASE,   // After USE DATABASE
+  GRANT_TO_ROLE,  // After GRANT ... TO ROLE
+  GRANT_TO_USER,  // After GRANT ... TO USER
   GENERAL,        // Default context
 }
 
@@ -36,8 +41,32 @@ export function parseContext(text: string, position: number): ParsedContext {
   // Determine context based on patterns
   let context = SQLContext.GENERAL;
 
+  // Check for USE WAREHOUSE context
+  if (/\buse\s+warehouse\s+[^;\s]*$/i.test(textLower)) {
+    context = SQLContext.USE_WAREHOUSE;
+  }
+  // Check for USE ROLE context
+  else if (/\buse\s+role\s+[^;\s]*$/i.test(textLower)) {
+    context = SQLContext.USE_ROLE;
+  }
+  // Check for USE DATABASE context
+  else if (/\buse\s+database\s+[^;\s]*$/i.test(textLower)) {
+    context = SQLContext.USE_DATABASE;
+  }
+  // Check for USE (shorthand) context - treat as DATABASE
+  else if (/\buse\s+[^;\s]*$/i.test(textLower) && !/\buse\s+(schema|warehouse|role|database)\b/i.test(textLower)) {
+    context = SQLContext.USE_DATABASE;
+  }
+  // Check for GRANT ... TO ROLE context
+  else if (/\bgrant\b.*\bto\s+role\s+[^;\s]*$/i.test(textLower)) {
+    context = SQLContext.GRANT_TO_ROLE;
+  }
+  // Check for GRANT ... TO USER context
+  else if (/\bgrant\b.*\bto\s+user\s+[^;\s]*$/i.test(textLower)) {
+    context = SQLContext.GRANT_TO_USER;
+  }
   // Check for schema.| or table.| or alias.| pattern
-  if (/(\w+)\.\s*$/i.test(beforeCursor)) {
+  else if (/(\w+)\.\s*$/i.test(beforeCursor)) {
     const match = beforeCursor.match(/(\w+)\.\s*$/i);
     if (match) {
       const identifier = match[1].toLowerCase();
