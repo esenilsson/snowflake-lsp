@@ -114,38 +114,48 @@ export class HoverProvider {
     const info = table.info;
     const qualifiedName = `${info.catalog}.${info.schema}.${info.name}`;
 
-    // Lazy-load columns if not already loaded
-    if (!this.schemaCache.hasColumns(qualifiedName)) {
-      try {
-        await this.schemaCache.ensureColumnsLoaded(
-          qualifiedName,
-          (db, schema, tbl) => this.snowflakeConnection.fetchColumnsForTable(db, schema, tbl)
-        );
-      } catch (error) {
-        console.error(`Failed to load columns for ${qualifiedName}:`, error);
-      }
-    }
+    // Skip async operations for now to prevent crashes
+    // TODO: Re-enable after fixing Snowflake query stability
+    const skipAsyncOps = true;
 
-    // Lazy-load DDL if not cached
-    let ddl: string | undefined = this.schemaCache.getDDL(qualifiedName);
-    if (!ddl) {
-      try {
-        ddl = await this.snowflakeConnection.fetchDDL(info.catalog, info.schema, info.name);
-        this.schemaCache.cacheDDL(qualifiedName, ddl);
-      } catch (error) {
-        ddl = undefined;
-      }
-    }
+    let columns: any[] = [];
+    let ddl: string | undefined = undefined;
 
-    // Get updated table with columns
-    const updatedTable = this.schemaCache.getTable(qualifiedName);
-    const columns = updatedTable?.columns || [];
+    if (!skipAsyncOps) {
+      // Lazy-load columns if not already loaded
+      if (!this.schemaCache.hasColumns(qualifiedName)) {
+        try {
+          await this.schemaCache.ensureColumnsLoaded(
+            qualifiedName,
+            (db, schema, tbl) => this.snowflakeConnection.fetchColumnsForTable(db, schema, tbl)
+          );
+        } catch (error) {
+          console.error(`Failed to load columns for ${qualifiedName}:`, error);
+        }
+      }
+
+      // Lazy-load DDL if not cached
+      ddl = this.schemaCache.getDDL(qualifiedName);
+      if (!ddl) {
+        try {
+          ddl = await this.snowflakeConnection.fetchDDL(info.catalog, info.schema, info.name);
+          this.schemaCache.cacheDDL(qualifiedName, ddl);
+        } catch (error) {
+          console.error(`Failed to fetch DDL for ${qualifiedName}:`, error);
+          ddl = undefined;
+        }
+      }
+
+      // Get updated table with columns
+      const updatedTable = this.schemaCache.getTable(qualifiedName);
+      columns = updatedTable?.columns || [];
+    }
 
     const columnList = columns.length > 0
       ? columns
           .map((col: any) => `  - \`${col.columnName}\` (${col.dataType})`)
           .join('\n')
-      : '  _(No columns found)_';
+      : '  _(Columns not loaded - hover again to load)_';
 
     const markdown = [
       `### Table: \`${info.name}\``,
