@@ -22,6 +22,15 @@ export class CompletionProvider {
       // Parse the SQL context
       const parsed = parseContext(text, offset);
 
+      // Check for query history trigger patterns
+      const beforeCursor = text.substring(0, offset);
+      const lastLine = beforeCursor.split('\n').pop() || '';
+
+      // If line starts with comment and contains 'history', show query history
+      if (/^\s*--\s*history/i.test(lastLine) || /\bqh:/i.test(lastLine)) {
+        return this.getQueryHistoryCompletions(parsed.currentWord);
+      }
+
       // Generate completions based on context
       const completions: CompletionItem[] = [];
 
@@ -329,5 +338,54 @@ export class CompletionProvider {
       documentation: `Database: ${db.name}\nOwner: ${db.owner}\nCreated: ${db.created_on}\nRetention: ${db.retention_time} day(s)${db.comment ? `\nComment: ${db.comment}` : ''}`,
       insertText: db.name,
     }));
+  }
+
+  /**
+   * Get query history completions
+   */
+  private getQueryHistoryCompletions(prefix: string): CompletionItem[] {
+    const queries = this.schemaCache.searchQueryHistory(prefix, 20);
+
+    return queries.map((query, index) => {
+      // Truncate query text for label (first 60 chars)
+      const truncatedQuery = query.query_text.length > 60
+        ? query.query_text.substring(0, 60) + '...'
+        : query.query_text;
+
+      // Format execution time
+      const executionSeconds = (query.total_elapsed_time / 1000).toFixed(2);
+
+      // Format timestamp
+      const timestamp = new Date(query.start_time).toLocaleString();
+
+      return {
+        label: `${index + 1}. ${truncatedQuery}`,
+        kind: CompletionItemKind.Snippet,
+        detail: `${timestamp} (${executionSeconds}s)`,
+        documentation: `Query ID: ${query.query_id}\n` +
+                      `Database: ${query.database_name}.${query.schema_name}\n` +
+                      `User: ${query.user_name}\n` +
+                      `Warehouse: ${query.warehouse_name} (${query.warehouse_size})\n` +
+                      `Execution Time: ${executionSeconds}s\n` +
+                      `Rows Produced: ${query.rows_produced.toLocaleString()}\n` +
+                      `Bytes Scanned: ${this.formatBytes(query.bytes_scanned)}\n\n` +
+                      `Full Query:\n${query.query_text}`,
+        insertText: query.query_text,
+        sortText: `${index.toString().padStart(3, '0')}`, // Keep chronological order
+      };
+    });
+  }
+
+  /**
+   * Format bytes to human-readable format
+   */
+  private formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
   }
 }
