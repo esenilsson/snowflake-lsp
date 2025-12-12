@@ -1,4 +1,7 @@
 import snowflake from 'snowflake-sdk';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export interface SnowflakeConfig {
   account: string;
@@ -747,25 +750,105 @@ export class SnowflakeConnection {
 /**
  * Load Snowflake configuration from environment variables
  */
+/**
+ * Load config from ~/.snowflake/connections.toml
+ * Returns null if file doesn't exist or can't be parsed
+ */
+function loadConfigFromConnectionsFile(): SnowflakeConfig | null {
+  try {
+    const connectionsPath = path.join(os.homedir(), '.snowflake', 'connections.toml');
+
+    if (!fs.existsSync(connectionsPath)) {
+      return null;
+    }
+
+    const content = fs.readFileSync(connectionsPath, 'utf-8');
+
+    // Simple TOML parser for connections file
+    // Format: [CONNECTION_NAME]
+    //         key = "value"
+    const lines = content.split('\n');
+    let currentSection: string | null = null;
+    const config: any = {};
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      // Section header: [DK95507]
+      const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
+      if (sectionMatch) {
+        currentSection = sectionMatch[1];
+        continue;
+      }
+
+      // Key-value pair: key = "value" or key = value
+      if (currentSection) {
+        const kvMatch = trimmed.match(/^(\w+)\s*=\s*"?([^"]*)"?$/);
+        if (kvMatch) {
+          const [, key, value] = kvMatch;
+          config[key] = value;
+        }
+      }
+    }
+
+    // We need at least account and user
+    if (!config.account || !config.user) {
+      return null;
+    }
+
+    // For database and warehouse, try to get from env or use defaults
+    const database = config.database || process.env.SNOWFLAKE_DATABASE;
+    const warehouse = config.warehouse || process.env.SNOWFLAKE_WAREHOUSE;
+
+    // If still no database/warehouse, we can't continue
+    if (!database || !warehouse) {
+      console.log('Warning: connections.toml missing database or warehouse. Set SNOWFLAKE_DATABASE and SNOWFLAKE_WAREHOUSE environment variables.');
+      return null;
+    }
+
+    return {
+      account: config.account,
+      user: config.user,
+      database,
+      warehouse,
+      role: config.role,
+      schema: config.schema,
+    };
+  } catch (error) {
+    console.error('Failed to load connections.toml:', error);
+    return null;
+  }
+}
+
 export function loadConfigFromEnv(): SnowflakeConfig {
+  // First try environment variables
   const account = process.env.SNOWFLAKE_ACCOUNT;
   const user = process.env.SNOWFLAKE_USER;
   const database = process.env.SNOWFLAKE_DATABASE;
   const warehouse = process.env.SNOWFLAKE_WAREHOUSE;
 
-  if (!account || !user || !database || !warehouse) {
-    throw new Error(
-      'Missing required environment variables: ' +
-      'SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE, SNOWFLAKE_WAREHOUSE'
-    );
+  if (account && user && database && warehouse) {
+    return {
+      account,
+      user,
+      database,
+      warehouse,
+      role: process.env.SNOWFLAKE_ROLE,
+      schema: process.env.SNOWFLAKE_SCHEMA,
+    };
   }
 
-  return {
-    account,
-    user,
-    database,
-    warehouse,
-    role: process.env.SNOWFLAKE_ROLE,
-    schema: process.env.SNOWFLAKE_SCHEMA,
-  };
+  // Fall back to connections.toml
+  const fileConfig = loadConfigFromConnectionsFile();
+  if (fileConfig) {
+    console.log('Loaded configuration from ~/.snowflake/connections.toml');
+    return fileConfig;
+  }
+
+  // No configuration found
+  throw new Error(
+    'Missing Snowflake configuration. Either set environment variables:\n' +
+    '  SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_DATABASE, SNOWFLAKE_WAREHOUSE\n' +
+    'Or create ~/.snowflake/connections.toml with account, user, database, and warehouse'
+  );
 }
