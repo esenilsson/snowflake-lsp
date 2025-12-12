@@ -1,4 +1,4 @@
-import { TableInfo, ColumnInfo, ViewInfo, WarehouseInfo, RoleInfo, UserInfo, DatabaseInfo } from './snowflake';
+import { TableInfo, ColumnInfo, ViewInfo, WarehouseInfo, RoleInfo, UserInfo, DatabaseInfo, QueryHistoryInfo } from './snowflake';
 
 export interface CachedTable {
   qualifiedName: string; // DATABASE.SCHEMA.TABLE
@@ -29,6 +29,7 @@ export class SchemaCache {
   private roles: Map<string, RoleInfo> = new Map(); // Role name -> info
   private users: Map<string, UserInfo> = new Map(); // User name -> info
   private databases: Map<string, DatabaseInfo> = new Map(); // Database name -> info
+  private queryHistory: QueryHistoryInfo[] = []; // Recent queries
 
   // Index for partial matching (lowercase for case-insensitive search)
   private tableNameIndex: Map<string, string[]> = new Map();
@@ -53,6 +54,7 @@ export class SchemaCache {
     this.roles.clear();
     this.users.clear();
     this.databases.clear();
+    this.queryHistory = [];
   }
 
   /**
@@ -510,5 +512,36 @@ export class SchemaCache {
     return this.getDatabases().filter(db =>
       db.name.toLowerCase().startsWith(lowerPrefix)
     );
+  }
+
+  /**
+   * Load query history into cache
+   */
+  loadQueryHistory(queries: QueryHistoryInfo[]): void {
+    this.queryHistory = queries;
+    console.log(`Loaded ${queries.length} queries into cache`);
+  }
+
+  /**
+   * Get all queries from history
+   */
+  getQueryHistory(): QueryHistoryInfo[] {
+    return this.queryHistory;
+  }
+
+  /**
+   * Search query history by text content
+   */
+  searchQueryHistory(prefix: string, limit: number = 10): QueryHistoryInfo[] {
+    if (!prefix) {
+      return this.queryHistory.slice(0, limit);
+    }
+
+    const lowerPrefix = prefix.toLowerCase();
+    return this.queryHistory
+      .filter(query =>
+        query.query_text.toLowerCase().includes(lowerPrefix)
+      )
+      .slice(0, limit);
   }
 }

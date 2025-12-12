@@ -134,6 +134,36 @@ export interface UserInfo {
   comment: string | null;
 }
 
+export interface QueryHistoryInfo {
+  query_id: string;
+  query_text: string;
+  database_name: string;
+  schema_name: string;
+  query_type: string;
+  session_id: number;
+  user_name: string;
+  role_name: string;
+  warehouse_name: string;
+  warehouse_size: string;
+  warehouse_type: string;
+  cluster_number: number;
+  query_tag: string;
+  execution_status: string;
+  error_code: string | null;
+  error_message: string | null;
+  start_time: string;
+  end_time: string;
+  total_elapsed_time: number;
+  bytes_scanned: number;
+  rows_produced: number;
+  compilation_time: number;
+  execution_time: number;
+  queued_provisioning_time: number;
+  queued_repair_time: number;
+  queued_overload_time: number;
+  transaction_blocked_time: number;
+}
+
 export class SnowflakeConnection {
   private connection: snowflake.Connection | null = null;
   private config: SnowflakeConfig;
@@ -630,6 +660,85 @@ export class SnowflakeConnection {
       }));
     } catch (error) {
       console.error('SHOW DATABASES failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch recent query history using INFORMATION_SCHEMA.QUERY_HISTORY()
+   * Returns last 50 successful queries
+   */
+  async fetchQueryHistory(): Promise<QueryHistoryInfo[]> {
+    const query = `
+      SELECT
+        query_id,
+        query_text,
+        database_name,
+        schema_name,
+        query_type,
+        session_id,
+        user_name,
+        role_name,
+        warehouse_name,
+        warehouse_size,
+        warehouse_type,
+        cluster_number,
+        query_tag,
+        execution_status,
+        error_code,
+        error_message,
+        start_time,
+        end_time,
+        total_elapsed_time,
+        bytes_scanned,
+        rows_produced,
+        compilation_time,
+        execution_time,
+        queued_provisioning_time,
+        queued_repair_time,
+        queued_overload_time,
+        transaction_blocked_time
+      FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY())
+      WHERE execution_status = 'SUCCESS'
+        AND query_type != 'SHOW'
+        AND query_text NOT LIKE '%QUERY_HISTORY%'
+      ORDER BY start_time DESC
+      LIMIT 50
+    `;
+
+    try {
+      const rows = await this.executeQuery<any>(query);
+      return rows.map(row => ({
+        query_id: row.QUERY_ID || row.query_id,
+        query_text: row.QUERY_TEXT || row.query_text,
+        database_name: row.DATABASE_NAME || row.database_name,
+        schema_name: row.SCHEMA_NAME || row.schema_name,
+        query_type: row.QUERY_TYPE || row.query_type,
+        session_id: Number(row.SESSION_ID || row.session_id) || 0,
+        user_name: row.USER_NAME || row.user_name,
+        role_name: row.ROLE_NAME || row.role_name,
+        warehouse_name: row.WAREHOUSE_NAME || row.warehouse_name,
+        warehouse_size: row.WAREHOUSE_SIZE || row.warehouse_size || '',
+        warehouse_type: row.WAREHOUSE_TYPE || row.warehouse_type || '',
+        cluster_number: Number(row.CLUSTER_NUMBER || row.cluster_number) || 0,
+        query_tag: row.QUERY_TAG || row.query_tag || '',
+        execution_status: row.EXECUTION_STATUS || row.execution_status,
+        error_code: row.ERROR_CODE || row.error_code || null,
+        error_message: row.ERROR_MESSAGE || row.error_message || null,
+        start_time: row.START_TIME || row.start_time,
+        end_time: row.END_TIME || row.end_time,
+        total_elapsed_time: Number(row.TOTAL_ELAPSED_TIME || row.total_elapsed_time) || 0,
+        bytes_scanned: Number(row.BYTES_SCANNED || row.bytes_scanned) || 0,
+        rows_produced: Number(row.ROWS_PRODUCED || row.rows_produced) || 0,
+        compilation_time: Number(row.COMPILATION_TIME || row.compilation_time) || 0,
+        execution_time: Number(row.EXECUTION_TIME || row.execution_time) || 0,
+        queued_provisioning_time: Number(row.QUEUED_PROVISIONING_TIME || row.queued_provisioning_time) || 0,
+        queued_repair_time: Number(row.QUEUED_REPAIR_TIME || row.queued_repair_time) || 0,
+        queued_overload_time: Number(row.QUEUED_OVERLOAD_TIME || row.queued_overload_time) || 0,
+        transaction_blocked_time: Number(row.TRANSACTION_BLOCKED_TIME || row.transaction_blocked_time) || 0,
+      }));
+    } catch (error) {
+      console.error('QUERY_HISTORY() failed:', error);
       return [];
     }
   }
