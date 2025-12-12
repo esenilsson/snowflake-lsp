@@ -222,7 +222,7 @@ async function validateDocument(document: TextDocument): Promise<void> {
   }
 
   try {
-    const diagnostics = diagnosticsProvider.provideDiagnostics(document);
+    const diagnostics = await diagnosticsProvider.provideDiagnostics(document);
     connection.sendDiagnostics({
       uri: document.uri,
       diagnostics,

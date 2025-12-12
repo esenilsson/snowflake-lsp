@@ -2,18 +2,24 @@ import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { SchemaCache } from './schema-cache';
 import { parseContext } from './sql-parser';
+import { spawn } from 'child_process';
 
 export class DiagnosticsProvider {
-  constructor(private schemaCache: SchemaCache) {}
+  private sqlfluffEnabled: boolean;
+
+  constructor(private schemaCache: SchemaCache) {
+    // Check if sqlfluff is enabled via environment variable
+    this.sqlfluffEnabled = process.env.SNOWFLAKE_LSP_ENABLE_SQLFLUFF === 'true';
+  }
 
   /**
    * Validate document and return diagnostics
    */
-  provideDiagnostics(document: TextDocument): Diagnostic[] {
+  async provideDiagnostics(document: TextDocument): Promise<Diagnostic[]> {
     const diagnostics: Diagnostic[] = [];
     const text = document.getText();
 
-    // Extract table references and validate they exist
+    // Extract table references and validate they exist (semantic checks)
     const tableRefs = this.extractTableReferences(text);
     for (const ref of tableRefs) {
       // Try to find the table with multiple strategies
@@ -34,6 +40,128 @@ export class DiagnosticsProvider {
 
     // Skip column validation for now - it's too complex and error-prone
     // Column validation would require proper SQL parsing to be reliable
+
+    // Run sqlfluff linting if enabled
+    if (this.sqlfluffEnabled) {
+      try {
+        const sqlfluffDiagnostics = await this.runSqlfluff(text);
+        diagnostics.push(...sqlfluffDiagnostics);
+      } catch (error) {
+        // Silently fail - sqlfluff might not be installed
+        console.log('sqlfluff not available or failed:', error);
+      }
+    }
+
+    return diagnostics;
+  }
+
+  /**
+   * Run sqlfluff and parse output
+   */
+  private async runSqlfluff(text: string): Promise<Diagnostic[]> {
+    return new Promise((resolve) => {
+      try {
+        const process = spawn('sqlfluff', ['lint', '--dialect', 'snowflake', '--format', 'json', '-']);
+
+        let stdout = '';
+        let stderr = '';
+
+        process.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
+
+        process.stderr.on('data', (data) => {
+          stderr += data.toString();
+        });
+
+        process.on('error', (error: any) => {
+          // Command not found or other spawn error
+          if (error.code === 'ENOENT') {
+            console.log('sqlfluff command not found - install with: pip install sqlfluff');
+          } else {
+            console.log('sqlfluff error:', error);
+          }
+          resolve([]);
+        });
+
+        process.on('close', (code) => {
+          try {
+            // sqlfluff returns non-zero exit code when violations are found
+            // So we don't treat non-zero as an error
+            if (stdout) {
+              const result = JSON.parse(stdout);
+              resolve(this.parseSqlfluffOutput(result));
+            } else {
+              resolve([]);
+            }
+          } catch (error) {
+            console.log('Failed to parse sqlfluff output:', error);
+            resolve([]);
+          }
+        });
+
+        // Set timeout
+        const timeout = setTimeout(() => {
+          process.kill();
+          resolve([]);
+        }, 5000);
+
+        process.on('close', () => {
+          clearTimeout(timeout);
+        });
+
+        // Write SQL to stdin
+        process.stdin.write(text);
+        process.stdin.end();
+      } catch (error) {
+        console.log('sqlfluff spawn error:', error);
+        resolve([]);
+      }
+    });
+  }
+
+  /**
+   * Parse sqlfluff JSON output to LSP diagnostics
+   */
+  private parseSqlfluffOutput(result: any): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+
+    if (!result || !Array.isArray(result)) {
+      return diagnostics;
+    }
+
+    // sqlfluff returns array of file results
+    for (const fileResult of result) {
+      if (!fileResult.violations || !Array.isArray(fileResult.violations)) {
+        continue;
+      }
+
+      for (const violation of fileResult.violations) {
+        // Map sqlfluff severity to LSP severity
+        let severity: DiagnosticSeverity;
+        // sqlfluff doesn't have explicit severity, so we treat all as warnings
+        severity = DiagnosticSeverity.Warning;
+
+        const diagnostic: Diagnostic = {
+          severity,
+          range: {
+            start: {
+              line: (violation.line_no || 1) - 1, // LSP uses 0-based lines
+              character: (violation.line_pos || 1) - 1, // LSP uses 0-based characters
+            },
+            end: {
+              line: (violation.line_no || 1) - 1,
+              character: (violation.line_pos || 1) + 10, // Estimate end position
+            },
+          },
+          message: `[${violation.code}] ${violation.description}`,
+          source: 'sqlfluff',
+          code: violation.code,
+        };
+
+        diagnostics.push(diagnostic);
+      }
+    }
 
     return diagnostics;
   }
